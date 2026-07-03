@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flight Corridor Advisory System</title>
+<style>
+  :root{
+    --bg:#0A0E17;
+    --panel:#101827;
+    --panel-2:#131C2E;
+    --line:#22304A;
+    --cyan:#5EEAD4;
+    --amber:#FFB020;
+    --red:#FF5C5C;
+    --text:#DCE4F0;
+    --muted:#8B96AB;
+    --mono: ui-monospace, "SF Mono", "IBM Plex Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    min-height:100vh;
+  }
+  body{
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(94,234,212,0.05), transparent 40%),
+      radial-gradient(circle at 85% 90%, rgba(255,176,32,0.04), transparent 45%);
+  }
+
+  /* ---------- Top status bar ---------- */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 24px;
+    border-bottom:1px solid var(--line);
+    background:rgba(16,24,39,0.9);
+    position:sticky;
+    top:0;
+    z-index:20;
+    backdrop-filter: blur(6px);
+  }
+  .brand{
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+  }
+  .brand .eyebrow{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.18em;
+    color:var(--cyan);
+    text-transform:uppercase;
+  }
+  .brand h1{
+    font-size:16px;
+    font-weight:600;
+    letter-spacing:0.02em;
+  }
+  .status{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--muted);
+  }
+  .dot{
+    width:8px; height:8px; border-radius:50%;
+    background:var(--muted);
+    flex-shrink:0;
+  }
+  .dot.live{ background:var(--cyan); box-shadow:0 0 8px var(--cyan); animation:pulse 2s infinite; }
+  .dot.demo{ background:var(--amber); box-shadow:0 0 8px var(--amber); }
+  @keyframes pulse{
+    0%,100%{ opacity:1; }
+    50%{ opacity:0.35; }
+  }
+
+  /* ---------- Layout ---------- */
+  .wrap{
+    max-width:1320px;
+    margin:0 auto;
+    padding:24px;
+    display:grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap:20px;
+  }
+  @media (max-width: 980px){
+    .wrap{ grid-template-columns: 1fr; }
+  }
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:18px 20px;
+  }
+  .panel + .panel{ margin-top:20px; }
+
+  .panel-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:14px;
+  }
+  .panel-title{
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--text);
+  }
+  .panel-sub{
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--muted);
+  }
+
+  /* ---------- Radar / scatter map ---------- */
+  .radar-frame{
+    position:relative;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:
+      linear-gradient(rgba(94,234,212,0.05) 1px, transparent 1px) 0 0/40px 40px,
+      linear-gradient(90deg, rgba(94,234,212,0.05) 1px, transparent 1px) 0 0/40px 40px,
+      var(--panel-2);
+    overflow:hidden;
+    aspect-ratio: 16 / 11;
+  }
+  .sweep{
+    position:absolute;
+    top:50%; left:50%;
+    width:200%; height:200%;
+    transform-origin:0 0;
+    background:conic-gradient(from 0deg, rgba(94,234,212,0.16), transparent 22%);
+    animation:sweep 6s linear infinite;
+    pointer-events:none;
+    mix-blend-mode:screen;
+  }
+  @keyframes sweep{ to{ transform: rotate(360deg); } }
+
+  #mapCanvas{ position:relative; width:100%; height:100%; display:block; }
+
+  .legend{
+    display:flex; gap:16px; margin-top:12px; flex-wrap:wrap;
+    font-family:var(--mono); font-size:10px; color:var(--muted);
+  }
+  .legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .swatch{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+
+  /* ---------- Region bars ---------- */
+  .region-row{
+    display:grid;
+    grid-template-columns: 46px 1fr 44px;
+    align-items:center;
+    gap:10px;
+    padding:7px 0;
+    border-bottom:1px solid rgba(255,255,255,0.04);
+  }
+  .region-row:last-child{ border-bottom:none; }
+  .region-name{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--muted);
+  }
+  .bar-track{
+    height:8px;
+    border-radius:4px;
+    background:rgba(255,255,255,0.05);
+    overflow:hidden;
+  }
+  .bar-fill{
+    height:100%;
+    border-radius:4px;
+    transition: width 0.6s ease;
+  }
+  .region-val{
+    font-family:var(--mono);
+    font-size:11px;
+    text-align:right;
+    color:var(--text);
+  }
+
+  /* ---------- Stats strip ---------- */
+  .stats{
+    display:grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap:12px;
+    margin-top:16px;
+  }
+  .stat{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:10px 12px;
+  }
+  .stat .num{
+    font-family:var(--mono);
+    font-size:18px;
+    color:var(--cyan);
+  }
+  .stat .lbl{
+    font-size:10px;
+    color:var(--muted);
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    margin-top:2px;
+  }
+
+  /* ---------- Advisory form ---------- */
+  .field-row{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:10px;
+    margin-bottom:12px;
+  }
+  label{
+    display:block;
+    font-size:10px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin-bottom:6px;
+  }
+  select, button{
+    width:100%;
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--text);
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:9px 10px;
+  }
+  select:focus, button:focus-visible{
+    outline:2px solid var(--cyan);
+    outline-offset:1px;
+  }
+  button{
+    cursor:pointer;
+    background:var(--cyan);
+    color:#04141F;
+    font-weight:700;
+    letter-spacing:0.04em;
+    border:none;
+    transition: filter 0.15s ease;
+  }
+  button:hover{ filter:brightness(1.08); }
+  button:active{ filter:brightness(0.94); }
+
+  .advisory-result{
+    margin-top:16px;
+    border-top:1px solid var(--line);
+    padding-top:16px;
+  }
+  .rec-badge{
+    display:inline-block;
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.08em;
+    padding:4px 8px;
+    border-radius:4px;
+    text-transform:uppercase;
+    margin-bottom:10px;
+  }
+  .rec-badge.ok{ background:rgba(94,234,212,0.14); color:var(--cyan); border:1px solid rgba(94,234,212,0.35); }
+  .rec-badge.warn{ background:rgba(255,176,32,0.14); color:var(--amber); border:1px solid rgba(255,176,32,0.35); }
+
+  .rec-line{
+    font-size:13px;
+    color:var(--text);
+    line-height:1.55;
+    margin-bottom:12px;
+  }
+  .rec-line b{ color:var(--cyan); font-family:var(--mono); }
+
+  table.candidates{
+    width:100%;
+    border-collapse:collapse;
+    font-family:var(--mono);
+    font-size:11px;
+  }
+  table.candidates th{
+    text-align:left;
+    color:var(--muted);
+    font-weight:500;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    font-size:9.5px;
+    padding:6px 6px;
+    border-bottom:1px solid var(--line);
+  }
+  table.candidates td{
+    padding:7px 6px;
+    border-bottom:1px solid rgba(255,255,255,0.04);
+    color:var(--text);
+  }
+  table.candidates tr.best td{ color:var(--cyan); }
+  table.candidates tr.best td:first-child::before{
+    content:"\2192  ";
+  }
+
+  .risk-chip{
+    display:inline-block;
+    padding:1px 6px;
+    border-radius:3px;
+    font-size:10.5px;
+  }
+
+  .disclaimer{
+    margin-top:16px;
+    font-size:10.5px;
+    color:var(--muted);
+    line-height:1.5;
+    border-top:1px solid var(--line);
+    padding-top:12px;
+  }
+  .config-note{
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--muted);
+    background:var(--panel-2);
+    border:1px dashed var(--line);
+    border-radius:6px;
+    padding:10px 12px;
+    margin-bottom:16px;
+    line-height:1.6;
+  }
+  .config-note code{ color:var(--amber); }
+
+  footer{
+    max-width:1320px;
+    margin:0 auto;
+    padding:8px 24px 40px;
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="eyebrow">FCAS &middot; v1</span>
+    <h1>Flight Corridor Advisory System</h1>
+  </div>
+  <div class="status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">Connecting&hellip;</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- LEFT COLUMN -->
+  <div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Recent Turbulence Reports</span>
+        <span class="panel-sub" id="mapSub">&mdash;</span>
+      </div>
+      <div class="radar-frame">
+        <div class="sweep"></div>
+        <canvas id="mapCanvas"></canvas>
+      </div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--cyan)"></span>Calm (0&ndash;1)</span>
+        <span><span class="swatch" style="background:var(--amber)"></span>Light&ndash;Moderate (2&ndash;4)</span>
+        <span><span class="swatch" style="background:var(--red)"></span>Severe (5+)</span>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="num" id="statReports">&mdash;</div><div class="lbl">Reports (24h)</div></div>
+        <div class="stat"><div class="num" id="statAvg">&mdash;</div><div class="lbl">Avg risk / 8</div></div>
+        <div class="stat"><div class="num" id="statUpdated">&mdash;</div><div class="lbl">Last updated</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Regional Risk</span>
+        <span class="panel-sub">current avg, max 8</span>
+      </div>
+      <div id="regionBars"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT COLUMN -->
+  <div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Route Advisory</span>
+        <span class="panel-sub">live estimate</span>
+      </div>
+
+      <div class="field-row">
+        <div>
+          <label for="origin">Origin</label>
+          <select id="origin"></select>
+        </div>
+        <div>
+          <label for="destination">Destination</label>
+          <select id="destination"></select>
+        </div>
+      </div>
+      <button id="computeBtn">Compute advisory</button>
+
+      <div class="advisory-result" id="advisoryResult" style="display:none;">
+        <span class="rec-badge" id="recBadge"></span>
+        <div class="rec-line" id="recLine"></div>
+        <table class="candidates">
+          <thead>
+            <tr><th>Option</th><th>Risk</th><th>+NM</th><th>+Fuel</th><th>+Time</th></tr>
+          </thead>
+          <tbody id="candidateRows"></tbody>
+        </table>
+      </div>
+
+      <div class="disclaimer">
+        Decision-support estimate only. Route risk here is a client-side approximation
+        (distance-weighted average of nearby recent reports), not the trained LSTM model itself &mdash;
+        that model runs in the companion Colab notebooks. Any route change must be requested from
+        and approved by ATC.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  flight-corridor-project &middot; data: aviationweather.gov PIREPs, collected via n8n + Supabase &middot;
+  forecasting: LSTM (trained in Colab) &middot; this view: live client-side snapshot
+</footer>
+
+<script>
+/* ============================================================
+   CONFIG — fill these in with your own Supabase project values.
+   Settings → API → Project URL / anon public key.
+   Leave as-is to run in demo mode with sample data.
+   ============================================================ */
+const SUPABASE_URL = "https://YOUR-PROJECT-ID.supabase.co";
+const SUPABASE_KEY = "YOUR-ANON-PUBLIC-KEY";
+
+const REGION_BOXES = {
+  NE:  [35, -90, 50, -65],
+  SE:  [24, -90, 35, -65],
+  MW:  [35, -105, 50, -90],
+  SW:  [24, -105, 35, -90],
+  NW:  [35, -125, 50, -105],
+  SWC: [24, -125, 35, -105],
+};
+
+const AIRPORTS = {
+  JFK: { name: "New York (JFK)", lat: 40.6413, lon: -73.7781 },
+  LAX: { name: "Los Angeles (LAX)", lat: 33.9416, lon: -118.4085 },
+  ORD: { name: "Chicago (ORD)", lat: 41.9742, lon: -87.9073 },
+  ATL: { name: "Atlanta (ATL)", lat: 33.6407, lon: -84.4277 },
+  DFW: { name: "Dallas (DFW)", lat: 32.8998, lon: -97.0403 },
+  SEA: { name: "Seattle (SEA)", lat: 47.4502, lon: -122.3088 },
+  MIA: { name: "Miami (MIA)", lat: 25.7959, lon: -80.2870 },
+};
+
+// Fallback sample data, used automatically if Supabase isn't configured
+// or the fetch fails — so this dashboard is always presentable, offline or not.
+const DEMO_DATA = [
+  {lat:26.11,lon:-79.80,turb_score:2,ac_type:"A320",collected_at:new Date().toISOString()},
+  {lat:26.37,lon:-81.25,turb_score:0,ac_type:"SR22",collected_at:new Date().toISOString()},
+  {lat:40.20,lon:-75.10,turb_score:4,ac_type:"B738",collected_at:new Date().toISOString()},
+  {lat:41.80,lon:-88.10,turb_score:2,ac_type:"A321",collected_at:new Date().toISOString()},
+  {lat:38.60,lon:-90.30,turb_score:5,ac_type:"CRJ9",collected_at:new Date().toISOString()},
+  {lat:33.80,lon:-84.50,turb_score:0,ac_type:"A320",collected_at:new Date().toISOString()},
+  {lat:32.90,lon:-97.00,turb_score:2,ac_type:"B739",collected_at:new Date().toISOString()},
+  {lat:36.10,lon:-115.20,turb_score:0,ac_type:"A319",collected_at:new Date().toISOString()},
+  {lat:47.60,lon:-122.30,turb_score:2,ac_type:"B737",collected_at:new Date().toISOString()},
+  {lat:34.05,lon:-118.30,turb_score:0,ac_type:"A320",collected_at:new Date().toISOString()},
+  {lat:29.80,lon:-95.40,turb_score:4,ac_type:"E175",collected_at:new Date().toISOString()},
+  {lat:39.30,lon:-104.90,turb_score:6,ac_type:"B739",collected_at:new Date().toISOString()},
+  {lat:44.90,lon:-93.20,turb_score:2,ac_type:"A321",collected_at:new Date().toISOString()},
+  {lat:35.20,lon:-101.80,turb_score:0,ac_type:"CRJ7",collected_at:new Date().toISOString()},
+  {lat:28.40,lon:-81.30,turb_score:2,ac_type:"B738",collected_at:new Date().toISOString()},
+];
+
+let liveData = [];
+let usingDemo = false;
+
+function riskColor(score){
+  if(score <= 1) return getCss('--cyan');
+  if(score <= 4) return getCss('--amber');
+  return getCss('--red');
+}
+function getCss(varName){
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+function haversineNm(lat1, lon1, lat2, lon2){
+  const R = 3440.065;
+  const toRad = d => d * Math.PI / 180;
+  const dphi = toRad(lat2 - lat1);
+  const dlambda = toRad(lon2 - lon1);
+  const p1 = toRad(lat1), p2 = toRad(lat2);
+  const a = Math.sin(dphi/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin(dlambda/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function getRegion(lat, lon){
+  for(const [name, box] of Object.entries(REGION_BOXES)){
+    const [minLat, minLon, maxLat, maxLon] = box;
+    if(lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon) return name;
+  }
+  return null;
+}
+
+async function loadData(){
+  const configured = !SUPABASE_URL.includes("YOUR-PROJECT-ID") && !SUPABASE_KEY.includes("YOUR-ANON");
+  if(!configured){
+    setStatus("demo", "Demo mode — add your Supabase credentials in the script");
+    liveData = DEMO_DATA;
+    usingDemo = true;
+    render();
+    return;
+  }
+  try{
+    const cutoff = Math.floor(Date.now()/1000) - 24*3600;
+    const url = `${SUPABASE_URL}/rest/v1/pireps?select=lat,lon,turb_score,ac_type,collected_at&obs_time=gte.${cutoff}&order=collected_at.desc&limit=500`;
+    const resp = await fetch(url, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+    });
+    if(!resp.ok) throw new Error("HTTP " + resp.status);
+    const rows = await resp.json();
+    if(!rows || rows.length === 0) throw new Error("empty");
+    liveData = rows.filter(r => r.lat != null && r.lon != null);
+    usingDemo = false;
+    setStatus("live", `Live — ${liveData.length} reports from Supabase`);
+  }catch(err){
+    console.warn("Falling back to demo data:", err);
+    liveData = DEMO_DATA;
+    usingDemo = true;
+    setStatus("demo", "Demo mode — live fetch failed, showing sample data");
+  }
+  render();
+}
+
+function setStatus(kind, text){
+  const dot = document.getElementById('statusDot');
+  const label = document.getElementById('statusText');
+  dot.className = 'dot ' + (kind === 'live' ? 'live' : 'demo');
+  label.textContent = text;
+}
+
+function render(){
+  renderMap();
+  renderRegionBars();
+  renderStats();
+}
+
+function renderMap(){
+  const canvas = document.getElementById('mapCanvas');
+  const frame = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const w = frame.clientWidth, h = frame.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0,0,w,h);
+
+  // Continental US bounding box for projection
+  const bounds = { minLat: 24, maxLat: 50, minLon: -125, maxLon: -65 };
+  const project = (lat, lon) => {
+    const x = ((lon - bounds.minLon) / (bounds.maxLon - bounds.minLon)) * w;
+    const y = h - ((lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * h;
+    return [x, y];
+  };
+
+  // faint region outlines
+  ctx.strokeStyle = 'rgba(139,150,171,0.18)';
+  ctx.lineWidth = 1;
+  Object.values(REGION_BOXES).forEach(([minLat,minLon,maxLat,maxLon]) => {
+    const [x1,y1] = project(maxLat, minLon);
+    const [x2,y2] = project(minLat, maxLon);
+    ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+  });
+
+  liveData.forEach(d => {
+    if(d.lat == null || d.lon == null) return;
+    const [x,y] = project(d.lat, d.lon);
+    const score = d.turb_score || 0;
+    const r = 3 + Math.min(score, 6) * 0.9;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.fillStyle = riskColor(score);
+    ctx.globalAlpha = 0.85;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+
+  document.getElementById('mapSub').textContent = usingDemo ? 'sample data' : 'live · continental US';
+}
+
+function renderRegionBars(){
+  const container = document.getElementById('regionBars');
+  container.innerHTML = '';
+  const regionAverages = {};
+  Object.keys(REGION_BOXES).forEach(r => regionAverages[r] = []);
+
+  liveData.forEach(d => {
+    const region = getRegion(d.lat, d.lon);
+    if(region) regionAverages[region].push(d.turb_score || 0);
+  });
+
+  Object.entries(regionAverages).forEach(([region, scores]) => {
+    const avg = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : 0;
+    const pct = Math.min(100, (avg/8)*100);
+    const row = document.createElement('div');
+    row.className = 'region-row';
+    row.innerHTML = `
+      <span class="region-name">${region}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${pct}%; background:${riskColor(avg)}"></span></span>
+      <span class="region-val">${avg.toFixed(1)}</span>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function renderStats(){
+  document.getElementById('statReports').textContent = liveData.length;
+  const avg = liveData.length ? (liveData.reduce((a,d)=>a+(d.turb_score||0),0)/liveData.length) : 0;
+  document.getElementById('statAvg').textContent = avg.toFixed(1);
+  document.getElementById('statUpdated').textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+
+/* ---------- Route advisory ---------- */
+function populateAirports(){
+  const originSel = document.getElementById('origin');
+  const destSel = document.getElementById('destination');
+  Object.entries(AIRPORTS).forEach(([code, a]) => {
+    originSel.innerHTML += `<option value="${code}">${a.name}</option>`;
+    destSel.innerHTML += `<option value="${code}">${a.name}</option>`;
+  });
+  originSel.value = "JFK";
+  destSel.value = "LAX";
+}
+
+function localSpatialRisk(lat, lon, sigmaNm=75, maxRadiusNm=300){
+  let wSum = 0, wScoreSum = 0;
+  liveData.forEach(d => {
+    if(d.lat == null || d.lon == null) return;
+    const dist = haversineNm(lat, lon, d.lat, d.lon);
+    if(dist > maxRadiusNm) return;
+    const weight = Math.exp(-(dist*dist) / (2*sigmaNm*sigmaNm));
+    wSum += weight;
+    wScoreSum += weight * (d.turb_score || 0);
+  });
+  return wSum > 1e-6 ? wScoreSum / wSum : 0;
+}
+
+function generateWaypoints(o, d, n=5){
+  const pts = [];
+  for(let i=0;i<n;i++){
+    const t = i/(n-1);
+    pts.push([ o.lat + (d.lat-o.lat)*t, o.lon + (d.lon-o.lon)*t ]);
+  }
+  return pts;
+}
+function shiftRoute(waypoints, latOffset){
+  return waypoints.map((p,i) => (i===0 || i===waypoints.length-1) ? p : [p[0]+latOffset, p[1]]);
+}
+function pathLengthNm(pts){
+  let total = 0;
+  for(let i=0;i<pts.length-1;i++) total += haversineNm(pts[i][0],pts[i][1],pts[i+1][0],pts[i+1][1]);
+  return total;
+}
+
+function computeAdvisory(){
+  const originCode = document.getElementById('origin').value;
+  const destCode = document.getElementById('destination').value;
+  const origin = AIRPORTS[originCode];
+  const dest = AIRPORTS[destCode];
+
+  if(originCode === destCode){
+    alert("Choose two different airports.");
+    return;
+  }
+
+  const originalWpts = generateWaypoints(origin, dest);
+  const originalLength = pathLengthNm(originalWpts);
+  const deviations = [0, 1, -1, 2, -2, 3, -3, 4, -4];
+  const FUEL_KG_PER_NM = 6.5, SPEED_KTS = 470;
+  const RISK_WEIGHT = 10, COST_WEIGHT = 0.01;
+
+  const results = deviations.map(dev => {
+    const wpts = dev === 0 ? originalWpts : shiftRoute(originalWpts, dev);
+    const risk = Math.max(...wpts.map(([lat,lon]) => localSpatialRisk(lat, lon)));
+    const extraNm = pathLengthNm(wpts) - originalLength;
+    const extraFuel = Math.max(0, extraNm) * FUEL_KG_PER_NM;
+    const extraTime = Math.max(0, extraNm) / SPEED_KTS * 60;
+    const label = dev === 0 ? "Direct route" : `${dev>0?'North':'South'} deviation (${Math.abs(dev)}\u00b0)`;
+    return {
+      label, risk, extraNm, extraFuel, extraTime,
+      composite: RISK_WEIGHT*risk + COST_WEIGHT*extraFuel
+    };
+  }).sort((a,b) => a.composite - b.composite);
+
+  renderAdvisory(results, originCode, destCode);
+}
+
+function riskChip(risk){
+  const color = riskColor(risk);
+  return `<span class="risk-chip" style="background:${color}22; color:${color}">${risk.toFixed(2)}</span>`;
+}
+
+function renderAdvisory(results, originCode, destCode){
+  const panel = document.getElementById('advisoryResult');
+  panel.style.display = 'block';
+
+  const best = results[0];
+  const direct = results.find(r => r.label === "Direct route");
+  const badge = document.getElementById('recBadge');
+  const line = document.getElementById('recLine');
+
+  if(best.label === "Direct route"){
+    badge.className = 'rec-badge ok';
+    badge.textContent = 'Direct route clear';
+    line.innerHTML = `<b>${originCode} \u2192 ${destCode}</b>: direct route carries the lowest evaluated risk (${best.risk.toFixed(2)}/8). No deviation recommended.`;
+  } else {
+    badge.className = 'rec-badge warn';
+    badge.textContent = 'Deviation recommended';
+    const reduction = direct.risk - best.risk;
+    line.innerHTML = `<b>${originCode} \u2192 ${destCode}</b>: <b>${best.label}</b> reduces predicted risk by ${reduction.toFixed(2)} vs. direct` +
+      (best.extraFuel > 0 ? `, at a cost of ${best.extraFuel.toFixed(0)} kg fuel and ${best.extraTime.toFixed(1)} min.` : ' at effectively no distance cost.');
+  }
+
+  const rows = document.getElementById('candidateRows');
+  rows.innerHTML = results.map(r => `
+    <tr class="${r === best ? 'best' : ''}">
+      <td>${r.label}</td>
+      <td>${riskChip(r.risk)}</td>
+      <td>${r.extraNm >= 0 ? '+' : ''}${r.extraNm.toFixed(0)}</td>
+      <td>${r.extraFuel.toFixed(0)} kg</td>
+      <td>${r.extraTime.toFixed(1)} min</td>
+    </tr>
+  `).join('');
+}
+
+/* ---------- Init ---------- */
+populateAirports();
+document.getElementById('computeBtn').addEventListener('click', computeAdvisory);
+window.addEventListener('resize', renderMap);
+loadData().then(() => computeAdvisory());
+</script>
+</body>
+</html>
